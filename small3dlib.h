@@ -143,60 +143,87 @@
 #include "S3L_types.h"
 #include "S3L_config.h"
 
+extern void S3L_PIXEL_FUNCTION(S3L_PixelInfo *pixel); // forward decl
 
-void S3L_initVec4(S3L_Vec4 *v);
-void S3L_setVec4(S3L_Vec4 *v, S3L_Unit x, S3L_Unit y,S3L_Unit z, S3L_Unit w);
-void S3L_vec3Add(S3L_Vec4 *result, S3L_Vec4 added);
-void S3L_vec3Sub(S3L_Vec4 *result, S3L_Vec4 substracted);
-S3L_Unit S3L_vec2Length(S3L_Vec4 v);
-S3L_Unit S3L_vec3Length(S3L_Vec4 v);
-void S3L_normalizeVec3Fast(S3L_Vec4 *v);
-void S3L_normalizeVec3(S3L_Vec4 *v);
+extern S3L_Unit S3L_sin(S3L_Unit x);
+extern S3L_Unit S3L_asin(S3L_Unit x);
+extern S3L_Unit S3L_cos(S3L_Unit x);
+extern S3L_Unit S3L_sqrt(S3L_Unit value);
+extern void S3L_initVec4(S3L_Vec4 *v);
+extern void S3L_setVec4(S3L_Vec4 *v, S3L_Unit x, S3L_Unit y,S3L_Unit z, S3L_Unit w);
+extern void S3L_vec3Add(S3L_Vec4 *result, S3L_Vec4 added);
+extern void S3L_vec3Sub(S3L_Vec4 *result, S3L_Vec4 substracted);
+extern S3L_Unit S3L_vec2Length(S3L_Vec4 v);
+extern S3L_Unit S3L_vec3Length(S3L_Vec4 v);
+extern void S3L_normalizeVec3Fast(S3L_Vec4 *v);
+extern void S3L_normalizeVec3(S3L_Vec4 *v);
 #define S3L_logVec4(v)\
   printf("Vec4: %d %d %d %d\n",((v).x),((v).y),((v).z),((v).w))
 /** Initializes a 4x4 matrix to identity. */
-void S3L_initMat4(S3L_Mat4 m);
-void S3L_copyMat4(S3L_Mat4 src, S3L_Mat4 dst);
+extern void S3L_initMat4(S3L_Mat4 m); //matrix update
+extern void S3L_copyMat4(S3L_Mat4 src, S3L_Mat4 dst); //matrix update
+#define S3L_logMat4(m)\
+  printf("Mat4:\n  %d %d %d %d\n  %d %d %d %d\n  %d %d %d %d\n  %d %d %d %d\n"\
+   ,(m)[0][0],(m)[1][0],(m)[2][0],(m)[3][0],\
+    (m)[0][1],(m)[1][1],(m)[2][1],(m)[3][1],\
+    (m)[0][2],(m)[1][2],(m)[2][2],(m)[3][2],\
+    (m)[0][3],(m)[1][3],(m)[2][3],(m)[3][3])
 /** Like S3L_normalizeVec3, but doesn't perform any checks on the input vector,
   which is faster, but can be very innacurate or overflowing. You are supposed
   to provide a "nice" vector (not too big or small). */
-S3L_Unit S3L_dotProductVec3(S3L_Vec4 a, S3L_Vec4 b);
+extern S3L_Unit S3L_dotProductVec3(S3L_Vec4 a, S3L_Vec4 b);
 /** Normalizes Vec3. Note that this function tries to normalize correctly
   rather than quickly! If you need to normalize quickly, do it yourself in a
   way that best fits your case. */
-void S3L_crossProduct(S3L_Vec4 a, S3L_Vec4 b, S3L_Vec4 *result);
+extern void S3L_crossProduct(S3L_Vec4 a, S3L_Vec4 b, S3L_Vec4 *result);
 /** Computes a reflection direction (typically used e.g. for specular component
   in Phong illumination). The input vectors must be normalized. The result will
   be normalized as well. */
 /** Multiplies a vector by a matrix with normalization by
   S3L_FRACTIONS_PER_UNIT. Result is stored in the input vector. */
-void S3L_vec4Xmat4(S3L_Vec4 *v, S3L_Mat4 m);
+extern void S3L_vec4Xmat4(S3L_Vec4 *v, S3L_Mat4 m);//matrix update
 /** Same as S3L_vec4Xmat4 but faster, because this version doesn't compute the
   W component of the result, which is usually not needed. */
-void S3L_vec3Xmat4(S3L_Vec4 *v, S3L_Mat4 m);
+extern void S3L_vec3Xmat4(S3L_Vec4 *v, S3L_Mat4 m);//matrix update
 /** Multiplies two matrices with normalization by S3L_FRACTIONS_PER_UNIT.
   Result is stored in the first matrix. The result represents a transformation
   that has the same effect as applying the transformation represented by m1 and
   then m2 (in that order). */
-void S3L_mat4Xmat4(S3L_Mat4 m1, S3L_Mat4 m2);
-void S3L_transposeMat4(S3L_Mat4 m);
-void S3L_reflect(S3L_Vec4 toLight, S3L_Vec4 normal, S3L_Vec4 *result);
+extern void S3L_mat4Xmat4(S3L_Mat4 m1, S3L_Mat4 m2);//matrix update
+extern void S3L_transposeMat4(S3L_Mat4 m);//matrix update
+extern void S3L_rotate2DPoint(S3L_Unit *x, S3L_Unit *y, S3L_Unit angle);
+extern void S3L_reflect(S3L_Vec4 toLight, S3L_Vec4 normal, S3L_Vec4 *result);
 #define S3L_logTransform3D(t)\
   printf("Transform3D: T = [%d %d %d], R = [%d %d %d], S = [%d %d %d]\n",\
     (t).translation.x,(t).translation.y,(t).translation.z,\
     (t).rotation.x,(t).rotation.y,(t).rotation.z,\
     (t).scale.x,(t).scale.y,(t).scale.z)
-void S3L_lookAt(S3L_Vec4 pointTo, S3L_Transform3D *t);
+extern void S3L_lookAt(S3L_Vec4 pointTo, S3L_Transform3D *t);
+/** Corrects barycentric coordinates so that they exactly meet the defined
+  conditions (each fall into <0,S3L_FRACTIONS_PER_UNIT>, sum =
+  S3L_FRACTIONS_PER_UNIT). Note that doing this per-pixel can slow the program
+  down significantly. */
+extern void S3L_correctBarycentricCoords(S3L_Unit barycentric[3]);
+/** Returns a value interpolated between the three triangle vertices based on
+  barycentric coordinates. */
+extern S3L_Unit S3L_interpolateBarycentric(
+  S3L_Unit value0,
+  S3L_Unit value1,
+  S3L_Unit value2,
+  S3L_Unit barycentric[3]);
+
+
+
 /** Writes a value (not necessarily depth! depends on the format of z-buffer)
   to z-buffer (if enabled). Does NOT check boundaries! */
-void S3L_zBufferWrite(S3L_ScreenCoord x, S3L_ScreenCoord y, S3L_Unit value);
+extern void S3L_zBufferWrite(S3L_ScreenCoord x, S3L_ScreenCoord y, S3L_Unit value);
 /** Reads a value (not necessarily depth! depends on the format of z-buffer)
   from z-buffer (if enabled). Does NOT check boundaries! */
-S3L_Unit S3L_zBufferRead(S3L_ScreenCoord x, S3L_ScreenCoord y);
-void S3L_zBufferClear(void);
+extern S3L_Unit S3L_zBufferRead(S3L_ScreenCoord x, S3L_ScreenCoord y);
+extern void S3L_zBufferClear(void);
 
-void S3L_initTransform3D(S3L_Transform3D *t);
-void S3L_setTransform3D(
+extern void S3L_initTransform3D(S3L_Transform3D *t);
+extern void S3L_setTransform3D(
   S3L_Unit tx,
   S3L_Unit ty,
   S3L_Unit tz,
@@ -209,66 +236,58 @@ void S3L_setTransform3D(
   S3L_Transform3D *t);
 /** Converts rotation transformation to three direction vectors of given length
   (any one can be NULL, in which case it won't be computed). */
-void S3L_rotationToDirections(
+extern void S3L_rotationToDirections(
   S3L_Vec4 rotation,
   S3L_Unit length,
   S3L_Vec4 *forw, 
   S3L_Vec4 *right,
   S3L_Vec4 *up);
-#define S3L_logMat4(m)\
-  printf("Mat4:\n  %d %d %d %d\n  %d %d %d %d\n  %d %d %d %d\n  %d %d %d %d\n"\
-   ,(m)[0][0],(m)[1][0],(m)[2][0],(m)[3][0],\
-    (m)[0][1],(m)[1][1],(m)[2][1],(m)[3][1],\
-    (m)[0][2],(m)[1][2],(m)[2][2],(m)[3][2],\
-    (m)[0][3],(m)[1][3],(m)[2][3],(m)[3][3])
 
 
-void S3L_makeTranslationMat(
+
+extern void S3L_makeTranslationMat(
   S3L_Unit offsetX,
   S3L_Unit offsetY,
   S3L_Unit offsetZ,
-  S3L_Mat4 m);
+  S3L_Mat4 m);//matrix update
 /** Makes a scaling matrix. DON'T FORGET: scale of 1.0 is set with
   S3L_FRACTIONS_PER_UNIT! */
-void S3L_makeScaleMatrix(
+extern void S3L_makeScaleMatrix(
   S3L_Unit scaleX,
   S3L_Unit scaleY,
   S3L_Unit scaleZ,
-  S3L_Mat4 m);
+  S3L_Mat4 m);//matrix update
 /** Makes a matrix for rotation in the ZXY order. */
-void S3L_makeRotationMatrixZXY(
+extern void S3L_makeRotationMatrixZXY(
   S3L_Unit byX,
   S3L_Unit byY,
   S3L_Unit byZ,
-  S3L_Mat4 m);
-void S3L_makeWorldMatrix(S3L_Transform3D worldTransform, S3L_Mat4 m);
-void S3L_makeCameraMatrix(S3L_Transform3D cameraTransform, S3L_Mat4 m);
-void S3L_initCamera(S3L_Camera *camera);
-void S3L_initDrawConfig(S3L_DrawConfig *config);
-void S3L_initModel3D(
+  S3L_Mat4 m);//matrix update
+extern void S3L_makeWorldMatrix(S3L_Transform3D worldTransform, S3L_Mat4 m);//matrix update
+extern void S3L_makeCameraMatrix(S3L_Transform3D cameraTransform, S3L_Mat4 m);//matrix update
+extern void S3L_initCamera(S3L_Camera *camera);
+extern void S3L_initDrawConfig(S3L_DrawConfig *config);
+extern void S3L_initModel3D(
   const S3L_Unit *vertices,
   S3L_Index vertexCount,
   const S3L_Index *triangles,
   S3L_Index triangleCount,
   S3L_Model3D *model);
-void S3L_initScene(
+extern void S3L_initScene(
   S3L_Model3D *models,
   S3L_Index modelCount,
   S3L_Scene *scene);
-S3L_Unit S3L_sin(S3L_Unit x);
-S3L_Unit S3L_asin(S3L_Unit x);
-S3L_Unit S3L_vec3Length(S3L_Vec4 v);
-S3L_Unit S3L_sqrt(S3L_Unit value);
+
 /** Projects a single point from 3D space to the screen space (pixels), which
   can be useful e.g. for drawing sprites. The w component of input and result
   holds the point size. If this size is 0 in the result, the sprite is outside
   the view. */
-void project3DPointToScreen(
+extern void project3DPointToScreen(
   S3L_Vec4 point,
   S3L_Camera camera,
   S3L_Vec4 *result);
 /** Computes a normalized normal of given triangle. */
-void S3L_triangleNormal(S3L_Vec4 t0, S3L_Vec4 t1, S3L_Vec4 t2,
+extern void S3L_triangleNormal(S3L_Vec4 t0, S3L_Vec4 t1, S3L_Vec4 t2,
   S3L_Vec4 *n);
 /** Helper function for retrieving per-vertex indexed values from an array,
   e.g. texturing (UV) coordinates. The 'indices' array contains three indices
@@ -278,7 +297,7 @@ void S3L_triangleNormal(S3L_Vec4 t0, S3L_Vec4 t1, S3L_Vec4 t2,
   vectors (into x, y, z and w, depending on 'numComponents'). This function is
   meant to be used per-triangle (typically from a cache), NOT per-pixel, as it
   is not as fast as possible! */
-void S3L_getIndexedTriangleValues(
+extern void S3L_getIndexedTriangleValues(
   S3L_Index triangleIndex,
   const S3L_Index *indices,
   const S3L_Unit *values,
@@ -297,13 +316,13 @@ void S3L_getIndexedTriangleValues(
   the triangles containing the vertex. The maximum number of these triangle
   normals that will be averaged is set with
   S3L_NORMAL_COMPUTE_MAXIMUM_AVERAGE. */
-void S3L_computeModelNormals(S3L_Model3D model, S3L_Unit *dst,
+extern void S3L_computeModelNormals(S3L_Model3D model, S3L_Unit *dst,
   int8_t transformNormals);
 /** Draws a triangle according to given config. The vertices are specified in
   Screen Space space (pixels). If perspective correction is enabled, each
   vertex has to have a depth (Z position in camera space) specified in the Z
   component. */
-void S3L_drawTriangle(
+extern void S3L_drawTriangle(
   S3L_Vec4 point0,
   S3L_Vec4 point1,
   S3L_Vec4 point2,
@@ -311,10 +330,10 @@ void S3L_drawTriangle(
   S3L_Index triangleIndex);
 /** This should be called before rendering each frame. The function clears
   buffers and does potentially other things needed for the frame. */
-void S3L_newFrame(void);
+extern void S3L_newFrame(void);
 
-void S3L_stencilBufferClear(void);
-
+extern void S3L_stencilBufferClear(void);
+extern void S3L_drawScene(S3L_Scene scene);
 /** Predefined vertices of a cube to simply insert in an array. These come with
     S3L_CUBE_TRIANGLES and S3L_CUBE_TEXCOORDS. */
 #define S3L_CUBE_VERTICES(m)\
