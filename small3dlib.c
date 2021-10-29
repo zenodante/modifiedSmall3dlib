@@ -262,26 +262,15 @@ static inline int8_t S3L_triangleWinding(
   S3L_ScreenCoord y1,
   S3L_ScreenCoord x2,
   S3L_ScreenCoord y2);
-
-
-
 static inline void S3L_initPixelInfo(S3L_PixelInfo *p);
-
-/** Corrects barycentric coordinates so that they exactly meet the defined
-  conditions (each fall into <0,S3L_FRACTIONS_PER_UNIT>, sum =
-  S3L_FRACTIONS_PER_UNIT). Note that doing this per-pixel can slow the program
-  down significantly. */
-static inline void S3L_correctBarycentricCoords(S3L_Unit barycentric[3]);
-
 // general helper functions
 static inline S3L_Unit S3L_abs(S3L_Unit value);
 static inline S3L_Unit S3L_min(S3L_Unit v1, S3L_Unit v2);
 static inline S3L_Unit S3L_max(S3L_Unit v1, S3L_Unit v2);
 static inline S3L_Unit S3L_clamp(S3L_Unit v, S3L_Unit v1, S3L_Unit v2);
+static inline S3L_Unit S3L_zeroClamp(S3L_Unit value);
 static inline S3L_Unit S3L_wrap(S3L_Unit value, S3L_Unit mod);
 static inline S3L_Unit S3L_nonZero(S3L_Unit value);
-static inline S3L_Unit S3L_zeroClamp(S3L_Unit value);
-static inline S3L_Unit S3L_cos(S3L_Unit x);
 
 /** Interpolated between two values, v1 and v2, in the same ratio as t is to
   tMax. Does NOT prevent zero division. */
@@ -290,44 +279,48 @@ static inline S3L_Unit S3L_interpolate(
   S3L_Unit v2,
   S3L_Unit t,
   S3L_Unit tMax);
-
 /** Same as S3L_interpolate but with v1 == 0. Should be faster. */
 static inline S3L_Unit S3L_interpolateFrom0(
   S3L_Unit v2,
   S3L_Unit t,
   S3L_Unit tMax);
-
 /** Like S3L_interpolate, but uses a parameter that goes from 0 to
   S3L_FRACTIONS_PER_UNIT - 1, which can be faster. */
 static inline S3L_Unit S3L_interpolateByUnit(
   S3L_Unit v1,
   S3L_Unit v2,
   S3L_Unit t);
-
 /** Same as S3L_interpolateByUnit but with v1 == 0. Should be faster. */
 static inline S3L_Unit S3L_interpolateByUnitFrom0(
   S3L_Unit v2,
   S3L_Unit t);
-
 static inline S3L_Unit S3L_distanceManhattan(S3L_Vec4 a, S3L_Vec4 b);
-
-/** Returns a value interpolated between the three triangle vertices based on
-  barycentric coordinates. */
-static inline S3L_Unit S3L_interpolateBarycentric(
-  S3L_Unit value0,
-  S3L_Unit value1,
-  S3L_Unit value2,
-  S3L_Unit barycentric[3]);
 
 static inline void S3L_mapProjectionPlaneToScreen(
   S3L_Vec4 point,
   S3L_ScreenCoord *screenX,
   S3L_ScreenCoord *screenY);
 
-static inline void S3L_rotate2DPoint(S3L_Unit *x, S3L_Unit *y, S3L_Unit angle);
+static inline void S3L_perspectiveDivide(
+    S3L_Vec4 *vector,
+  S3L_Unit focalLength);
 
-//=============================================================================
-// privates
+static inline int8_t S3L_triangleIsVisible(
+  S3L_Vec4 p0,
+  S3L_Vec4 p1,
+  S3L_Vec4 p2,
+  uint8_t backfaceCulling);
+
+static uint8_t _S3L_projectTriangle(
+  const S3L_Model3D *model,
+  S3L_Index triangleIndex,
+  S3L_Mat4 matrix,
+  uint32_t focalLength,
+  S3L_Vec4 transformed[6]);
+
+static inline void _S3L_mapProjectedVertexToScreen(
+    S3L_Vec4 *vertex, 
+    S3L_Unit focalLength);
 
 #define S3L_UNUSED(what) (void)(what) ///< helper macro for unused vars
 
@@ -348,7 +341,7 @@ static inline void S3L_rotate2DPoint(S3L_Unit *x, S3L_Unit *y, S3L_Unit angle);
     S3L_min(255,(depth) >> S3L_REDUCED_Z_BUFFER_GRANULARITY)
 #endif
 
-
+/////////////////////////////////////////////////////////////////////////////
 
 #if S3L_Z_BUFFER
 static inline int8_t S3L_zTest(
@@ -381,6 +374,36 @@ static inline int8_t S3L_zTest(
   return 0;
 }
 #endif
+
+
+static inline int8_t S3L_triangleWinding(
+  S3L_ScreenCoord x0,
+  S3L_ScreenCoord y0, 
+  S3L_ScreenCoord x1,
+  S3L_ScreenCoord y1,
+  S3L_ScreenCoord x2,
+  S3L_ScreenCoord y2)
+{
+  int32_t winding =
+    (y1 - y0) * (x2 - x1) - (x1 - x0) * (y2 - y1);
+    // ^ cross product for points with z == 0
+
+  return winding > 0 ? 1 : (winding < 0 ? -1 : 0);
+}
+
+static inline void S3L_initPixelInfo(S3L_PixelInfo *p)
+{
+  p->x = 0;
+  p->y = 0;
+  p->barycentric[0] = S3L_FRACTIONS_PER_UNIT;
+  p->barycentric[1] = 0;
+  p->barycentric[2] = 0;
+  p->modelIndex = 0;
+  p->triangleIndex = 0;
+  p->triangleID = 0;
+  p->depth = 0;
+  p->previousZ = 0;
+}
 
 #if S3L_STENCIL_BUFFER
   #define S3L_STENCIL_BUFFER_SIZE\
@@ -489,8 +512,362 @@ static const S3L_Unit S3L_sinTable[S3L_SIN_TABLE_LENGTH] =
   (S3L_FRACTIONS_PER_UNIT / (S3L_SIN_TABLE_LENGTH * 4))
 
 
+static inline S3L_Unit S3L_abs(S3L_Unit value)
+{
+  return value * (((value >= 0) << 1) - 1);
+}
 
+static inline S3L_Unit S3L_min(S3L_Unit v1, S3L_Unit v2)
+{
+  return v1 >= v2 ? v2 : v1;
+}
+
+static inline S3L_Unit S3L_max(S3L_Unit v1, S3L_Unit v2)
+{
+  return v1 >= v2 ? v1 : v2;
+}
+
+static inline S3L_Unit S3L_clamp(S3L_Unit v, S3L_Unit v1, S3L_Unit v2)
+{
+  return v >= v1 ? (v <= v2 ? v : v2) : v1;
+}
+
+static inline S3L_Unit S3L_zeroClamp(S3L_Unit value)
+{
+  return (value * (value >= 0));
+}
+
+static inline S3L_Unit S3L_wrap(S3L_Unit value, S3L_Unit mod)
+{
+  return value >= 0 ? (value % mod) : (mod + (value % mod) - 1);
+}
+
+static inline S3L_Unit S3L_nonZero(S3L_Unit value)
+{
+  return (value + (value == 0));
+}
+
+static inline S3L_Unit S3L_interpolate(S3L_Unit v1, S3L_Unit v2, S3L_Unit t, S3L_Unit tMax)
+{
+  return v1 + ((v2 - v1) * t) / tMax;
+}
+
+static inline S3L_Unit S3L_interpolateByUnit(S3L_Unit v1, S3L_Unit v2, S3L_Unit t)
+{
+  return v1 + ((v2 - v1) * t) / S3L_FRACTIONS_PER_UNIT;
+}
+
+static inline S3L_Unit S3L_interpolateByUnitFrom0(S3L_Unit v2, S3L_Unit t)
+{
+  return (v2 * t) / S3L_FRACTIONS_PER_UNIT;
+}
+
+static inline S3L_Unit S3L_interpolateFrom0(S3L_Unit v2, S3L_Unit t, S3L_Unit tMax)
+{
+  return (v2 * t) / tMax;
+}
+
+static inline S3L_Unit S3L_distanceManhattan(S3L_Vec4 a, S3L_Vec4 b)
+{
+  return
+    S3L_abs(a.x - b.x) +
+    S3L_abs(a.y - b.y) +
+    S3L_abs(a.z - b.z);
+}
+
+static inline void S3L_mapProjectionPlaneToScreen(
+  S3L_Vec4 point,
+  S3L_ScreenCoord *screenX,
+  S3L_ScreenCoord *screenY)
+{
+  *screenX = 
+    S3L_HALF_RESOLUTION_X +
+    (point.x * S3L_HALF_RESOLUTION_X) / S3L_FRACTIONS_PER_UNIT;
+
+  *screenY = 
+    S3L_HALF_RESOLUTION_Y -
+    (point.y * S3L_HALF_RESOLUTION_X) / S3L_FRACTIONS_PER_UNIT;
+}
+
+/** Performs perspecive division (z-divide). Does NOT check for division by
+  zero. */
+static inline void S3L_perspectiveDivide(S3L_Vec4 *vector,
+  S3L_Unit focalLength)
+{
+  vector->x = (vector->x * focalLength) / vector->z;
+  vector->y = (vector->y * focalLength) / vector->z;
+}
+
+
+/**
+  Checks if given triangle (in Screen Space) is at least partially visible,
+  i.e. returns false if the triangle is either completely outside the frustum
+  (left, right, top, bottom, near) or is invisible due to backface culling.
+*/
+static inline int8_t S3L_triangleIsVisible(
+  S3L_Vec4 p0,
+  S3L_Vec4 p1,
+  S3L_Vec4 p2,
+  uint8_t backfaceCulling)
+{
+  #define clipTest(c,cmp,v)\
+    (p0.c cmp (v) && p1.c cmp (v) && p2.c cmp (v))
+
+  if ( // outside frustum?
+#if S3L_NEAR_CROSS_STRATEGY == 0
+      p0.z <= S3L_NEAR || p1.z <= S3L_NEAR || p2.z <= S3L_NEAR ||
+      // ^ partially in front of NEAR?
+#else
+      clipTest(z,<=,S3L_NEAR) || // completely in front of NEAR?
+#endif
+      clipTest(x,<,0) ||
+      clipTest(x,>=,S3L_RESOLUTION_X) ||
+      clipTest(y,<,0) ||
+      clipTest(y,>,S3L_RESOLUTION_Y)
+    )
+    return 0;
+
+  #undef clipTest
+
+  if (backfaceCulling != 0)
+  {
+    int8_t winding =
+      S3L_triangleWinding(p0.x,p0.y,p1.x,p1.y,p2.x,p2.y);
+
+    if ((backfaceCulling == 1 && winding > 0) ||
+        (backfaceCulling == 2 && winding < 0))
+      return 0;
+  }
+
+  return 1;
+}
+
+/**
+  Projects a triangle to the screen. If enabled, a triangle can be potentially
+  subdivided into two if it crosses the near plane, in which case two projected
+  triangles are returned (return value will be 1).
+*/
+static uint8_t _S3L_projectTriangle(
+  const S3L_Model3D *model,
+  S3L_Index triangleIndex,
+  S3L_Mat4 matrix,
+  uint32_t focalLength,
+  S3L_Vec4 transformed[6])
+{
+  _S3L_projectVertex(model,triangleIndex,0,matrix,&(transformed[0]));
+  _S3L_projectVertex(model,triangleIndex,1,matrix,&(transformed[1]));
+  _S3L_projectVertex(model,triangleIndex,2,matrix,&(transformed[2]));
+
+  uint8_t result = 0;
+
+#if S3L_NEAR_CROSS_STRATEGY == 2
+  uint8_t infront = 0;
+  uint8_t behind = 0;
+  uint8_t infrontI[3];
+  uint8_t behindI[3];
+
+  for (uint8_t i = 0; i < 3; ++i)
+    if (transformed[i].z < S3L_NEAR)
+    {
+      infrontI[infront] = i;
+      infront++;
+    }
+    else
+    {
+      behindI[behind] = i;
+      behind++;
+    }
+
+#define interpolateVertex \
+  S3L_Unit ratio =\
+    ((transformed[be].z - S3L_NEAR) * S3L_FRACTIONS_PER_UNIT) /\
+    (transformed[be].z - transformed[in].z);\
+  transformed[in].x = transformed[be].x - \
+    ((transformed[be].x - transformed[in].x) * ratio) /\
+      S3L_FRACTIONS_PER_UNIT;\
+  transformed[in].y = transformed[be].y -\
+    ((transformed[be].y - transformed[in].y) * ratio) /\
+      S3L_FRACTIONS_PER_UNIT;\
+  transformed[in].z = S3L_NEAR;
+  
+  if (infront == 2)
+  {
+    // shift the two vertices forward along the edge
+    for (uint8_t i = 0; i < 2; ++i)
+    {
+      uint8_t be = behindI[0], in = infrontI[i];
+    
+      interpolateVertex
+    }
+  }
+  else if (infront == 1)
+  {
+    // create another triangle and do the shifts
+    transformed[3] = transformed[behindI[1]];
+    transformed[4] = transformed[infrontI[0]];
+    transformed[5] = transformed[infrontI[0]];
+
+    for (uint8_t i = 0; i < 2; ++i)
+    {
+      uint8_t be = behindI[i], in = i + 4;
+
+      interpolateVertex
+    }
+
+    transformed[infrontI[0]] = transformed[4];
+
+    _S3L_mapProjectedVertexToScreen(&transformed[3],focalLength);
+    _S3L_mapProjectedVertexToScreen(&transformed[4],focalLength);
+    _S3L_mapProjectedVertexToScreen(&transformed[5],focalLength);
+
+    result = 1;
+  }
+
+#undef interpolateVertex
+#endif // S3L_NEAR_CROSS_STRATEGY == 2
+
+  _S3L_mapProjectedVertexToScreen(&transformed[0],focalLength);
+  _S3L_mapProjectedVertexToScreen(&transformed[1],focalLength);
+  _S3L_mapProjectedVertexToScreen(&transformed[2],focalLength);
+
+  return result;
+}
+
+static inline void _S3L_mapProjectedVertexToScreen(S3L_Vec4 *vertex, S3L_Unit focalLength)
+{
+  vertex->z = vertex->z >= S3L_NEAR ? vertex->z : S3L_NEAR;
+  /* ^ This firstly prevents zero division in the follwoing z-divide and
+    secondly "pushes" vertices that are in front of near a little bit forward,
+    which makes them behave a bit better. If all three vertices end up exactly
+    on NEAR, the triangle will be culled. */ 
+
+  S3L_perspectiveDivide(vertex,focalLength);
+      
+  S3L_ScreenCoord sX, sY;
+      
+  S3L_mapProjectionPlaneToScreen(*vertex,&sX,&sY);
+   
+  vertex->x = sX;
+  vertex->y = sY;
+}
+
+static inline void _S3L_projectVertex(
+  const S3L_Model3D *model,
+  S3L_Index triangleIndex,
+  uint8_t vertex,
+  S3L_Mat4 projectionMatrix, 
+  S3L_Vec4 *result)
+{
+  uint32_t vertexIndex = model->triangles[triangleIndex * 3 + vertex] * 3;
+
+  result->x = model->vertices[vertexIndex];
+  result->y = model->vertices[vertexIndex + 1];
+  result->z = model->vertices[vertexIndex + 2];
+  result->w = S3L_FRACTIONS_PER_UNIT; // needed for translation 
+ 
+  S3L_vec3Xmat4(result,projectionMatrix);
+
+  result->w = result->z;
+  /* We'll keep the non-clamped z in w for sorting. */ 
+}
 //function body-------------------------------------------------------------------------------
+S3L_Unit S3L_sin(S3L_Unit x)
+{
+  x = S3L_wrap(x / S3L_SIN_TABLE_UNIT_STEP,S3L_SIN_TABLE_LENGTH * 4);
+  int8_t positive = 1;
+
+  if (x < S3L_SIN_TABLE_LENGTH)
+  {
+  }
+  else if (x < S3L_SIN_TABLE_LENGTH * 2)
+  {
+    x = S3L_SIN_TABLE_LENGTH * 2 - x - 1;
+  }
+  else if (x < S3L_SIN_TABLE_LENGTH * 3)
+  {
+    x = x - S3L_SIN_TABLE_LENGTH * 2;
+    positive = 0;
+  }
+  else
+  {
+    x = S3L_SIN_TABLE_LENGTH - (x - S3L_SIN_TABLE_LENGTH * 3) - 1;
+    positive = 0;
+  }
+
+  return positive ? S3L_sinTable[x] : -1 * S3L_sinTable[x];
+}
+
+S3L_Unit S3L_asin(S3L_Unit x)
+{
+  x = S3L_clamp(x,-S3L_FRACTIONS_PER_UNIT,S3L_FRACTIONS_PER_UNIT);
+
+  int8_t sign = 1;
+
+  if (x < 0)
+  {
+    sign = -1;
+    x *= -1;
+  }
+
+  int16_t low = 0;
+  int16_t high = S3L_SIN_TABLE_LENGTH -1;
+  int16_t middle;
+
+  while (low <= high) // binary search
+  {
+    middle = (low + high) / 2;
+
+    S3L_Unit v = S3L_sinTable[middle];
+
+    if (v > x)
+      high = middle - 1;
+    else if (v < x)
+      low = middle + 1;
+    else
+      break;
+  }
+
+  middle *= S3L_SIN_TABLE_UNIT_STEP;
+
+  return sign * middle;
+}
+
+S3L_Unit S3L_cos(S3L_Unit x)
+{
+  return S3L_sin(x + S3L_FRACTIONS_PER_UNIT / 4);
+}
+
+S3L_Unit S3L_sqrt(S3L_Unit value)
+{
+  int8_t sign = 1;
+
+  if (value < 0)
+  {
+    sign = -1;
+    value *= -1;
+  }
+
+  uint32_t result = 0;
+  uint32_t a = value;
+  uint32_t b = 1u << 30;
+
+  while (b > a)
+    b >>= 2;
+
+  while (b != 0)
+  {
+    if (a >= result + b)
+    {
+      a -= result + b;
+      result = result +  2 * b;
+    }
+
+    b >>= 2;
+    result >>= 1;
+  }
+
+  return result * sign;
+}
 
 void S3L_initVec4(S3L_Vec4 *v)
 {
@@ -528,6 +905,8 @@ S3L_Unit S3L_vec3Length(S3L_Vec4 v)
 {
   return S3L_sqrt(v.x * v.x + v.y * v.y + v.z * v.z);  
 }
+
+
 
 void S3L_normalizeVec3Fast(S3L_Vec4 *v)
 {
@@ -695,6 +1074,25 @@ void S3L_transposeMat4(S3L_Mat4 m)
     }
 }
 
+void S3L_rotate2DPoint(S3L_Unit *x, S3L_Unit *y, S3L_Unit angle)
+{
+  if (angle < S3L_SIN_TABLE_UNIT_STEP)
+    return; // no visible rotation
+
+  S3L_Unit angleSin = S3L_sin(angle);
+  S3L_Unit angleCos = S3L_cos(angle);
+
+  S3L_Unit xBackup = *x;
+
+  *x =
+    (angleCos * (*x)) / S3L_FRACTIONS_PER_UNIT -
+    (angleSin * (*y)) / S3L_FRACTIONS_PER_UNIT;
+
+  *y =
+    (angleSin * xBackup) / S3L_FRACTIONS_PER_UNIT +
+    (angleCos * (*y)) / S3L_FRACTIONS_PER_UNIT;
+}
+
 void S3L_reflect(S3L_Vec4 toLight, S3L_Vec4 normal, S3L_Vec4 *result)
 {
   S3L_Unit d = 2 * S3L_dotProductVec3(toLight,normal);
@@ -702,6 +1100,63 @@ void S3L_reflect(S3L_Vec4 toLight, S3L_Vec4 normal, S3L_Vec4 *result)
   result->x = (normal.x * d) / S3L_FRACTIONS_PER_UNIT - toLight.x;
   result->y = (normal.y * d) / S3L_FRACTIONS_PER_UNIT - toLight.y;
   result->z = (normal.z * d) / S3L_FRACTIONS_PER_UNIT - toLight.z;
+}
+
+void S3L_lookAt(S3L_Vec4 pointTo, S3L_Transform3D *t)
+{
+  S3L_Vec4 v;
+
+  v.x = pointTo.x - t->translation.x;
+  v.y = pointTo.z - t->translation.z;
+
+  S3L_Unit dx = v.x;
+  S3L_Unit l = S3L_vec2Length(v);
+
+  dx = (v.x * S3L_FRACTIONS_PER_UNIT) / S3L_nonZero(l); // normalize
+
+  t->rotation.y = -1 * S3L_asin(dx);
+
+  if (v.y < 0)
+    t->rotation.y = S3L_FRACTIONS_PER_UNIT / 2 - t->rotation.y;
+
+  v.x = pointTo.y - t->translation.y;
+  v.y = l;
+ 
+  l = S3L_vec2Length(v);
+ 
+  dx = (v.x * S3L_FRACTIONS_PER_UNIT) / S3L_nonZero(l);
+
+  t->rotation.x = S3L_asin(dx);
+}
+
+void S3L_correctBarycentricCoords(S3L_Unit barycentric[3])
+{
+  barycentric[0] = S3L_clamp(barycentric[0],0,S3L_FRACTIONS_PER_UNIT);
+  barycentric[1] = S3L_clamp(barycentric[1],0,S3L_FRACTIONS_PER_UNIT);
+
+  S3L_Unit d = S3L_FRACTIONS_PER_UNIT - barycentric[0] - barycentric[1];
+
+  if (d < 0)
+  {
+    barycentric[0] += d;
+    barycentric[2] = 0;
+  }
+  else
+    barycentric[2] = d;
+}
+
+S3L_Unit S3L_interpolateBarycentric(
+  S3L_Unit value0,
+  S3L_Unit value1,
+  S3L_Unit value2,
+  S3L_Unit barycentric[3])
+{
+  return
+    (
+      (value0 * barycentric[0]) +
+      (value1 * barycentric[1]) +
+      (value2 * barycentric[2])
+    ) / S3L_FRACTIONS_PER_UNIT;
 }
 
 void S3L_zBufferWrite(S3L_ScreenCoord x, S3L_ScreenCoord y, S3L_Unit value)
@@ -735,10 +1190,276 @@ void S3L_zBufferClear(void)
 #endif
 }
 
+void S3L_initTransform3D(S3L_Transform3D *t)
+{
+  S3L_initVec4(&(t->translation));
+  S3L_initVec4(&(t->rotation));
+  t->scale.x = S3L_FRACTIONS_PER_UNIT;
+  t->scale.y = S3L_FRACTIONS_PER_UNIT;
+  t->scale.z = S3L_FRACTIONS_PER_UNIT;
+  t->scale.w = 0;
+}
 
+void S3L_setTransform3D(
+  S3L_Unit tx,
+  S3L_Unit ty,
+  S3L_Unit tz,
+  S3L_Unit rx,
+  S3L_Unit ry,
+  S3L_Unit rz,
+  S3L_Unit sx,
+  S3L_Unit sy,
+  S3L_Unit sz,
+  S3L_Transform3D *t)
+{
+  t->translation.x = tx;
+  t->translation.y = ty;
+  t->translation.z = tz;
 
+  t->rotation.x = rx;
+  t->rotation.y = ry;
+  t->rotation.z = rz;
 
+  t->scale.x = sx;
+  t->scale.y = sy;
+  t->scale.z = sz;
+}
 
+void S3L_rotationToDirections(
+  S3L_Vec4 rotation,
+  S3L_Unit length,
+  S3L_Vec4 *forw, 
+  S3L_Vec4 *right,
+  S3L_Vec4 *up)
+{
+  S3L_Mat4 m;
+
+  S3L_makeRotationMatrixZXY(rotation.x,rotation.y,rotation.z,m);
+
+  if (forw != 0)
+  {
+    forw->x = 0;
+    forw->y = 0;
+    forw->z = length;
+    S3L_vec3Xmat4(forw,m);
+  }
+
+  if (right != 0)
+  {
+    right->x = length;
+    right->y = 0;
+    right->z = 0;
+    S3L_vec3Xmat4(right,m);
+  }
+
+  if (up != 0)
+  {
+    up->x = 0;
+    up->y = length;
+    up->z = 0;
+    S3L_vec3Xmat4(up,m);
+  }
+}
+
+void S3L_makeTranslationMat(
+  S3L_Unit offsetX,
+  S3L_Unit offsetY,
+  S3L_Unit offsetZ,
+  S3L_Mat4 m)
+{
+  #define M(x,y) m[x][y]
+  #define S S3L_FRACTIONS_PER_UNIT
+
+  M(0,0) = S; M(1,0) = 0; M(2,0) = 0; M(3,0) = 0; 
+  M(0,1) = 0; M(1,1) = S; M(2,1) = 0; M(3,1) = 0; 
+  M(0,2) = 0; M(1,2) = 0; M(2,2) = S; M(3,2) = 0; 
+  M(0,3) = offsetX; M(1,3) = offsetY; M(2,3) = offsetZ; M(3,3) = S;
+
+  #undef M
+  #undef S
+}
+
+void S3L_makeScaleMatrix(
+  S3L_Unit scaleX,
+  S3L_Unit scaleY,
+  S3L_Unit scaleZ,
+  S3L_Mat4 m)
+{
+  #define M(x,y) m[x][y]
+
+  M(0,0) = scaleX; M(1,0) = 0;      M(2,0) = 0;     M(3,0) = 0; 
+  M(0,1) = 0;      M(1,1) = scaleY; M(2,1) = 0; M(3,1) = 0; 
+  M(0,2) = 0;      M(1,2) = 0;      M(2,2) = scaleZ; M(3,2) = 0; 
+  M(0,3) = 0;      M(1,3) = 0;     M(2,3) = 0; M(3,3) = S3L_FRACTIONS_PER_UNIT; 
+
+  #undef M
+}
+
+void S3L_makeRotationMatrixZXY(
+  S3L_Unit byX,
+  S3L_Unit byY,
+  S3L_Unit byZ,
+  S3L_Mat4 m)
+{
+  byX *= -1;
+  byY *= -1;
+  byZ *= -1;
+
+  S3L_Unit sx = S3L_sin(byX);
+  S3L_Unit sy = S3L_sin(byY);
+  S3L_Unit sz = S3L_sin(byZ);
+
+  S3L_Unit cx = S3L_cos(byX);
+  S3L_Unit cy = S3L_cos(byY);
+  S3L_Unit cz = S3L_cos(byZ);
+
+  #define M(x,y) m[x][y]
+  #define S S3L_FRACTIONS_PER_UNIT
+
+  M(0,0) = (cy * cz) / S + (sy * sx * sz) / (S * S);
+  M(1,0) = (cx * sz) / S;
+  M(2,0) = (cy * sx * sz) / (S * S) - (cz * sy) / S;
+  M(3,0) = 0;
+
+  M(0,1) = (cz * sy * sx) / (S * S) - (cy * sz) / S;
+  M(1,1) = (cx * cz) / S;
+  M(2,1) = (cy * cz * sx) / (S * S) + (sy * sz) / S;
+  M(3,1) = 0;
+
+  M(0,2) = (cx * sy) / S;
+  M(1,2) = -1 * sx;
+  M(2,2) = (cy * cx) / S;
+  M(3,2) = 0;
+
+  M(0,3) = 0;
+  M(1,3) = 0;
+  M(2,3) = 0;
+  M(3,3) = S3L_FRACTIONS_PER_UNIT;
+
+  #undef M
+  #undef S 
+}
+
+void S3L_makeWorldMatrix(S3L_Transform3D worldTransform, S3L_Mat4 m)
+{
+  S3L_makeScaleMatrix(
+    worldTransform.scale.x,
+    worldTransform.scale.y,
+    worldTransform.scale.z,
+    m);
+
+  S3L_Mat4 t;
+
+  S3L_makeRotationMatrixZXY(
+    worldTransform.rotation.x,
+    worldTransform.rotation.y,
+    worldTransform.rotation.z,
+    t);
+
+  S3L_mat4Xmat4(m,t);
+
+  S3L_makeTranslationMat(
+    worldTransform.translation.x,
+    worldTransform.translation.y,
+    worldTransform.translation.z,
+    t);
+
+  S3L_mat4Xmat4(m,t);
+}
+
+void S3L_makeCameraMatrix(S3L_Transform3D cameraTransform, S3L_Mat4 m)
+{
+  S3L_makeTranslationMat(
+    -1 * cameraTransform.translation.x,
+    -1 * cameraTransform.translation.y,
+    -1 * cameraTransform.translation.z,
+    m);
+
+  S3L_Mat4 r;
+
+  S3L_makeRotationMatrixZXY(
+    cameraTransform.rotation.x,
+    cameraTransform.rotation.y,
+    cameraTransform.rotation.z,
+    r);
+
+  S3L_transposeMat4(r); // transposing creates an inverse transform
+
+  S3L_mat4Xmat4(m,r);
+}
+
+void S3L_initCamera(S3L_Camera *camera)
+{
+  camera->focalLength = S3L_FRACTIONS_PER_UNIT;
+  S3L_initTransform3D(&(camera->transform));
+}
+
+void S3L_initDrawConfig(S3L_DrawConfig *config)
+{
+  config->backfaceCulling = 2;
+  config->visible = 1;
+}
+
+void S3L_initModel3D(
+  const S3L_Unit *vertices,
+  S3L_Index vertexCount,
+  const S3L_Index *triangles,
+  S3L_Index triangleCount,
+  S3L_Model3D *model)
+{
+  model->vertices = vertices;
+  model->vertexCount = vertexCount;
+  model->triangles = triangles;
+  model->triangleCount = triangleCount;
+  model->customTransformMatrix = 0;  
+
+  S3L_initTransform3D(&(model->transform));
+  S3L_initDrawConfig(&(model->config));
+}
+
+void S3L_initScene(
+  S3L_Model3D *models,
+  S3L_Index modelCount,
+  S3L_Scene *scene)
+{
+  scene->models = models;
+  scene->modelCount = modelCount;
+  S3L_initCamera(&(scene->camera));
+}
+
+void project3DPointToScreen(
+  S3L_Vec4 point,
+  S3L_Camera camera,
+  S3L_Vec4 *result)
+{
+  S3L_Mat4 m;
+  S3L_makeCameraMatrix(camera.transform,m);
+
+  S3L_Unit s = point.w;
+
+  point.w = S3L_FRACTIONS_PER_UNIT;
+
+  S3L_vec3Xmat4(&point,m);
+
+  point.z = S3L_nonZero(point.z);
+
+  S3L_perspectiveDivide(&point,camera.focalLength);
+
+  S3L_ScreenCoord x, y;
+
+  S3L_mapProjectionPlaneToScreen(point,&x,&y);
+
+  result->x = x;
+  result->y = y;
+  result->z = point.z;
+
+  result->w =
+    (point.z <= 0) ? 0 :
+    (
+      (s * camera.focalLength * S3L_RESOLUTION_X) /
+        (point.z * S3L_FRACTIONS_PER_UNIT)
+    );
+}
 
 
 void S3L_triangleNormal(S3L_Vec4 t0, S3L_Vec4 t1, S3L_Vec4 t2, S3L_Vec4 *n)
@@ -913,518 +1634,17 @@ void S3L_computeModelNormals(S3L_Model3D model, S3L_Unit *dst,
 
 
 
-S3L_Unit S3L_abs(S3L_Unit value)
-{
-  return value * (((value >= 0) << 1) - 1);
-}
-
-S3L_Unit S3L_min(S3L_Unit v1, S3L_Unit v2)
-{
-  return v1 >= v2 ? v2 : v1;
-}
-
-S3L_Unit S3L_max(S3L_Unit v1, S3L_Unit v2)
-{
-  return v1 >= v2 ? v1 : v2;
-}
-
-S3L_Unit S3L_clamp(S3L_Unit v, S3L_Unit v1, S3L_Unit v2)
-{
-  return v >= v1 ? (v <= v2 ? v : v2) : v1;
-}
-
-S3L_Unit S3L_zeroClamp(S3L_Unit value)
-{
-  return (value * (value >= 0));
-}
-
-S3L_Unit S3L_wrap(S3L_Unit value, S3L_Unit mod)
-{
-  return value >= 0 ? (value % mod) : (mod + (value % mod) - 1);
-}
-
-S3L_Unit S3L_nonZero(S3L_Unit value)
-{
-  return (value + (value == 0));
-}
-
-S3L_Unit S3L_interpolate(S3L_Unit v1, S3L_Unit v2, S3L_Unit t, S3L_Unit tMax)
-{
-  return v1 + ((v2 - v1) * t) / tMax;
-}
-
-S3L_Unit S3L_interpolateByUnit(S3L_Unit v1, S3L_Unit v2, S3L_Unit t)
-{
-  return v1 + ((v2 - v1) * t) / S3L_FRACTIONS_PER_UNIT;
-}
-
-S3L_Unit S3L_interpolateByUnitFrom0(S3L_Unit v2, S3L_Unit t)
-{
-  return (v2 * t) / S3L_FRACTIONS_PER_UNIT;
-}
-
-S3L_Unit S3L_interpolateFrom0(S3L_Unit v2, S3L_Unit t, S3L_Unit tMax)
-{
-  return (v2 * t) / tMax;
-}
-
-S3L_Unit S3L_distanceManhattan(S3L_Vec4 a, S3L_Vec4 b)
-{
-  return
-    S3L_abs(a.x - b.x) +
-    S3L_abs(a.y - b.y) +
-    S3L_abs(a.z - b.z);
-}
-
-
-
-S3L_Unit S3L_sin(S3L_Unit x)
-{
-  x = S3L_wrap(x / S3L_SIN_TABLE_UNIT_STEP,S3L_SIN_TABLE_LENGTH * 4);
-  int8_t positive = 1;
-
-  if (x < S3L_SIN_TABLE_LENGTH)
-  {
-  }
-  else if (x < S3L_SIN_TABLE_LENGTH * 2)
-  {
-    x = S3L_SIN_TABLE_LENGTH * 2 - x - 1;
-  }
-  else if (x < S3L_SIN_TABLE_LENGTH * 3)
-  {
-    x = x - S3L_SIN_TABLE_LENGTH * 2;
-    positive = 0;
-  }
-  else
-  {
-    x = S3L_SIN_TABLE_LENGTH - (x - S3L_SIN_TABLE_LENGTH * 3) - 1;
-    positive = 0;
-  }
-
-  return positive ? S3L_sinTable[x] : -1 * S3L_sinTable[x];
-}
-
-S3L_Unit S3L_asin(S3L_Unit x)
-{
-  x = S3L_clamp(x,-S3L_FRACTIONS_PER_UNIT,S3L_FRACTIONS_PER_UNIT);
-
-  int8_t sign = 1;
-
-  if (x < 0)
-  {
-    sign = -1;
-    x *= -1;
-  }
-
-  int16_t low = 0;
-  int16_t high = S3L_SIN_TABLE_LENGTH -1;
-  int16_t middle;
-
-  while (low <= high) // binary search
-  {
-    middle = (low + high) / 2;
-
-    S3L_Unit v = S3L_sinTable[middle];
-
-    if (v > x)
-      high = middle - 1;
-    else if (v < x)
-      low = middle + 1;
-    else
-      break;
-  }
-
-  middle *= S3L_SIN_TABLE_UNIT_STEP;
-
-  return sign * middle;
-}
-
-S3L_Unit S3L_cos(S3L_Unit x)
-{
-  return S3L_sin(x + S3L_FRACTIONS_PER_UNIT / 4);
-}
-
-void S3L_correctBarycentricCoords(S3L_Unit barycentric[3])
-{
-  barycentric[0] = S3L_clamp(barycentric[0],0,S3L_FRACTIONS_PER_UNIT);
-  barycentric[1] = S3L_clamp(barycentric[1],0,S3L_FRACTIONS_PER_UNIT);
-
-  S3L_Unit d = S3L_FRACTIONS_PER_UNIT - barycentric[0] - barycentric[1];
-
-  if (d < 0)
-  {
-    barycentric[0] += d;
-    barycentric[2] = 0;
-  }
-  else
-    barycentric[2] = d;
-}
-
-void S3L_makeTranslationMat(
-  S3L_Unit offsetX,
-  S3L_Unit offsetY,
-  S3L_Unit offsetZ,
-  S3L_Mat4 m)
-{
-  #define M(x,y) m[x][y]
-  #define S S3L_FRACTIONS_PER_UNIT
-
-  M(0,0) = S; M(1,0) = 0; M(2,0) = 0; M(3,0) = 0; 
-  M(0,1) = 0; M(1,1) = S; M(2,1) = 0; M(3,1) = 0; 
-  M(0,2) = 0; M(1,2) = 0; M(2,2) = S; M(3,2) = 0; 
-  M(0,3) = offsetX; M(1,3) = offsetY; M(2,3) = offsetZ; M(3,3) = S;
-
-  #undef M
-  #undef S
-}
-
-void S3L_makeScaleMatrix(
-  S3L_Unit scaleX,
-  S3L_Unit scaleY,
-  S3L_Unit scaleZ,
-  S3L_Mat4 m)
-{
-  #define M(x,y) m[x][y]
-
-  M(0,0) = scaleX; M(1,0) = 0;      M(2,0) = 0;     M(3,0) = 0; 
-  M(0,1) = 0;      M(1,1) = scaleY; M(2,1) = 0; M(3,1) = 0; 
-  M(0,2) = 0;      M(1,2) = 0;      M(2,2) = scaleZ; M(3,2) = 0; 
-  M(0,3) = 0;      M(1,3) = 0;     M(2,3) = 0; M(3,3) = S3L_FRACTIONS_PER_UNIT; 
-
-  #undef M
-}
-
-void S3L_makeRotationMatrixZXY(
-  S3L_Unit byX,
-  S3L_Unit byY,
-  S3L_Unit byZ,
-  S3L_Mat4 m)
-{
-  byX *= -1;
-  byY *= -1;
-  byZ *= -1;
-
-  S3L_Unit sx = S3L_sin(byX);
-  S3L_Unit sy = S3L_sin(byY);
-  S3L_Unit sz = S3L_sin(byZ);
-
-  S3L_Unit cx = S3L_cos(byX);
-  S3L_Unit cy = S3L_cos(byY);
-  S3L_Unit cz = S3L_cos(byZ);
-
-  #define M(x,y) m[x][y]
-  #define S S3L_FRACTIONS_PER_UNIT
-
-  M(0,0) = (cy * cz) / S + (sy * sx * sz) / (S * S);
-  M(1,0) = (cx * sz) / S;
-  M(2,0) = (cy * sx * sz) / (S * S) - (cz * sy) / S;
-  M(3,0) = 0;
-
-  M(0,1) = (cz * sy * sx) / (S * S) - (cy * sz) / S;
-  M(1,1) = (cx * cz) / S;
-  M(2,1) = (cy * cz * sx) / (S * S) + (sy * sz) / S;
-  M(3,1) = 0;
-
-  M(0,2) = (cx * sy) / S;
-  M(1,2) = -1 * sx;
-  M(2,2) = (cy * cx) / S;
-  M(3,2) = 0;
-
-  M(0,3) = 0;
-  M(1,3) = 0;
-  M(2,3) = 0;
-  M(3,3) = S3L_FRACTIONS_PER_UNIT;
-
-  #undef M
-  #undef S 
-}
-
-S3L_Unit S3L_sqrt(S3L_Unit value)
-{
-  int8_t sign = 1;
-
-  if (value < 0)
-  {
-    sign = -1;
-    value *= -1;
-  }
-
-  uint32_t result = 0;
-  uint32_t a = value;
-  uint32_t b = 1u << 30;
-
-  while (b > a)
-    b >>= 2;
-
-  while (b != 0)
-  {
-    if (a >= result + b)
-    {
-      a -= result + b;
-      result = result +  2 * b;
-    }
-
-    b >>= 2;
-    result >>= 1;
-  }
-
-  return result * sign;
-}
-
-
-
-
-void S3L_initTransform3D(S3L_Transform3D *t)
-{
-  S3L_initVec4(&(t->translation));
-  S3L_initVec4(&(t->rotation));
-  t->scale.x = S3L_FRACTIONS_PER_UNIT;
-  t->scale.y = S3L_FRACTIONS_PER_UNIT;
-  t->scale.z = S3L_FRACTIONS_PER_UNIT;
-  t->scale.w = 0;
-}
-
-
-/** Performs perspecive division (z-divide). Does NOT check for division by
-  zero. */
-static inline void S3L_perspectiveDivide(S3L_Vec4 *vector,
-  S3L_Unit focalLength)
-{
-  vector->x = (vector->x * focalLength) / vector->z;
-  vector->y = (vector->y * focalLength) / vector->z;
-}
-
-void project3DPointToScreen(
-  S3L_Vec4 point,
-  S3L_Camera camera,
-  S3L_Vec4 *result)
-{
-  S3L_Mat4 m;
-  S3L_makeCameraMatrix(camera.transform,m);
-
-  S3L_Unit s = point.w;
-
-  point.w = S3L_FRACTIONS_PER_UNIT;
-
-  S3L_vec3Xmat4(&point,m);
-
-  point.z = S3L_nonZero(point.z);
-
-  S3L_perspectiveDivide(&point,camera.focalLength);
-
-  S3L_ScreenCoord x, y;
-
-  S3L_mapProjectionPlaneToScreen(point,&x,&y);
-
-  result->x = x;
-  result->y = y;
-  result->z = point.z;
-
-  result->w =
-    (point.z <= 0) ? 0 :
-    (
-      (s * camera.focalLength * S3L_RESOLUTION_X) /
-        (point.z * S3L_FRACTIONS_PER_UNIT)
-    );
-}
-
-
-void S3L_lookAt(S3L_Vec4 pointTo, S3L_Transform3D *t)
-{
-  S3L_Vec4 v;
-
-  v.x = pointTo.x - t->translation.x;
-  v.y = pointTo.z - t->translation.z;
-
-  S3L_Unit dx = v.x;
-  S3L_Unit l = S3L_vec2Length(v);
-
-  dx = (v.x * S3L_FRACTIONS_PER_UNIT) / S3L_nonZero(l); // normalize
-
-  t->rotation.y = -1 * S3L_asin(dx);
-
-  if (v.y < 0)
-    t->rotation.y = S3L_FRACTIONS_PER_UNIT / 2 - t->rotation.y;
-
-  v.x = pointTo.y - t->translation.y;
-  v.y = l;
- 
-  l = S3L_vec2Length(v);
- 
-  dx = (v.x * S3L_FRACTIONS_PER_UNIT) / S3L_nonZero(l);
-
-  t->rotation.x = S3L_asin(dx);
-}
-
-void S3L_setTransform3D(
-  S3L_Unit tx,
-  S3L_Unit ty,
-  S3L_Unit tz,
-  S3L_Unit rx,
-  S3L_Unit ry,
-  S3L_Unit rz,
-  S3L_Unit sx,
-  S3L_Unit sy,
-  S3L_Unit sz,
-  S3L_Transform3D *t)
-{
-  t->translation.x = tx;
-  t->translation.y = ty;
-  t->translation.z = tz;
-
-  t->rotation.x = rx;
-  t->rotation.y = ry;
-  t->rotation.z = rz;
-
-  t->scale.x = sx;
-  t->scale.y = sy;
-  t->scale.z = sz;
-}
-
-void S3L_initCamera(S3L_Camera *camera)
-{
-  camera->focalLength = S3L_FRACTIONS_PER_UNIT;
-  S3L_initTransform3D(&(camera->transform));
-}
-
-void S3L_rotationToDirections(
-  S3L_Vec4 rotation,
-  S3L_Unit length,
-  S3L_Vec4 *forw, 
-  S3L_Vec4 *right,
-  S3L_Vec4 *up)
-{
-  S3L_Mat4 m;
-
-  S3L_makeRotationMatrixZXY(rotation.x,rotation.y,rotation.z,m);
-
-  if (forw != 0)
-  {
-    forw->x = 0;
-    forw->y = 0;
-    forw->z = length;
-    S3L_vec3Xmat4(forw,m);
-  }
-
-  if (right != 0)
-  {
-    right->x = length;
-    right->y = 0;
-    right->z = 0;
-    S3L_vec3Xmat4(right,m);
-  }
-
-  if (up != 0)
-  {
-    up->x = 0;
-    up->y = length;
-    up->z = 0;
-    S3L_vec3Xmat4(up,m);
-  }
-}
-
-void S3L_initPixelInfo(S3L_PixelInfo *p)
-{
-  p->x = 0;
-  p->y = 0;
-  p->barycentric[0] = S3L_FRACTIONS_PER_UNIT;
-  p->barycentric[1] = 0;
-  p->barycentric[2] = 0;
-  p->modelIndex = 0;
-  p->triangleIndex = 0;
-  p->triangleID = 0;
-  p->depth = 0;
-  p->previousZ = 0;
-}
-void S3L_initModel3D(
-  const S3L_Unit *vertices,
-  S3L_Index vertexCount,
-  const S3L_Index *triangles,
-  S3L_Index triangleCount,
-  S3L_Model3D *model)
-{
-  model->vertices = vertices;
-  model->vertexCount = vertexCount;
-  model->triangles = triangles;
-  model->triangleCount = triangleCount;
-  model->customTransformMatrix = 0;  
-
-  S3L_initTransform3D(&(model->transform));
-  S3L_initDrawConfig(&(model->config));
-}
-
-void S3L_initScene(
-  S3L_Model3D *models,
-  S3L_Index modelCount,
-  S3L_Scene *scene)
-{
-  scene->models = models;
-  scene->modelCount = modelCount;
-  S3L_initCamera(&(scene->camera));
-}
-
-void S3L_initDrawConfig(S3L_DrawConfig *config)
-{
-  config->backfaceCulling = 2;
-  config->visible = 1;
-}
-
-
 #ifndef S3L_PIXEL_FUNCTION
   #error Pixel rendering function (S3L_PIXEL_FUNCTION) not specified!
 #endif
 
-static inline void S3L_PIXEL_FUNCTION(S3L_PixelInfo *pixel); // forward decl
+
 
 #define S3L_getFastLerpValue(state)\
   (state.valueScaled >> S3L_FAST_LERP_QUALITY)
 
 #define S3L_stepFastLerp(state)\
   state.valueScaled += state.stepScaled
-
-static inline S3L_Unit S3L_interpolateBarycentric(
-  S3L_Unit value0,
-  S3L_Unit value1,
-  S3L_Unit value2,
-  S3L_Unit barycentric[3])
-{
-  return
-    (
-      (value0 * barycentric[0]) +
-      (value1 * barycentric[1]) +
-      (value2 * barycentric[2])
-    ) / S3L_FRACTIONS_PER_UNIT;
-}
-
-void S3L_mapProjectionPlaneToScreen(
-  S3L_Vec4 point,
-  S3L_ScreenCoord *screenX,
-  S3L_ScreenCoord *screenY)
-{
-  *screenX = 
-    S3L_HALF_RESOLUTION_X +
-    (point.x * S3L_HALF_RESOLUTION_X) / S3L_FRACTIONS_PER_UNIT;
-
-  *screenY = 
-    S3L_HALF_RESOLUTION_Y -
-    (point.y * S3L_HALF_RESOLUTION_X) / S3L_FRACTIONS_PER_UNIT;
-}
-
-
-
-void S3L_stencilBufferClear(void)
-{
-#if S3L_STENCIL_BUFFER
-  for (uint32_t i = 0; i < S3L_STENCIL_BUFFER_SIZE; ++i)
-    S3L_stencilBuffer[i] = 0;
-#endif
-}
-
-void S3L_newFrame(void)
-{
-  S3L_zBufferClear();
-  S3L_stencilBufferClear();
-}
 
 void S3L_drawTriangle(
   S3L_Vec4 point0,
@@ -1951,263 +2171,19 @@ void S3L_drawTriangle(
   #undef Z_RECIP_NUMERATOR 
 }
 
-void S3L_rotate2DPoint(S3L_Unit *x, S3L_Unit *y, S3L_Unit angle)
+void S3L_newFrame(void)
 {
-  if (angle < S3L_SIN_TABLE_UNIT_STEP)
-    return; // no visible rotation
-
-  S3L_Unit angleSin = S3L_sin(angle);
-  S3L_Unit angleCos = S3L_cos(angle);
-
-  S3L_Unit xBackup = *x;
-
-  *x =
-    (angleCos * (*x)) / S3L_FRACTIONS_PER_UNIT -
-    (angleSin * (*y)) / S3L_FRACTIONS_PER_UNIT;
-
-  *y =
-    (angleSin * xBackup) / S3L_FRACTIONS_PER_UNIT +
-    (angleCos * (*y)) / S3L_FRACTIONS_PER_UNIT;
+  S3L_zBufferClear();
+  S3L_stencilBufferClear();
 }
 
-void S3L_makeWorldMatrix(S3L_Transform3D worldTransform, S3L_Mat4 m)
+void S3L_stencilBufferClear(void)
 {
-  S3L_makeScaleMatrix(
-    worldTransform.scale.x,
-    worldTransform.scale.y,
-    worldTransform.scale.z,
-    m);
-
-  S3L_Mat4 t;
-
-  S3L_makeRotationMatrixZXY(
-    worldTransform.rotation.x,
-    worldTransform.rotation.y,
-    worldTransform.rotation.z,
-    t);
-
-  S3L_mat4Xmat4(m,t);
-
-  S3L_makeTranslationMat(
-    worldTransform.translation.x,
-    worldTransform.translation.y,
-    worldTransform.translation.z,
-    t);
-
-  S3L_mat4Xmat4(m,t);
-}
-
-
-
-void S3L_makeCameraMatrix(S3L_Transform3D cameraTransform, S3L_Mat4 m)
-{
-  S3L_makeTranslationMat(
-    -1 * cameraTransform.translation.x,
-    -1 * cameraTransform.translation.y,
-    -1 * cameraTransform.translation.z,
-    m);
-
-  S3L_Mat4 r;
-
-  S3L_makeRotationMatrixZXY(
-    cameraTransform.rotation.x,
-    cameraTransform.rotation.y,
-    cameraTransform.rotation.z,
-    r);
-
-  S3L_transposeMat4(r); // transposing creates an inverse transform
-
-  S3L_mat4Xmat4(m,r);
-}
-
-int8_t S3L_triangleWinding(
-  S3L_ScreenCoord x0,
-  S3L_ScreenCoord y0, 
-  S3L_ScreenCoord x1,
-  S3L_ScreenCoord y1,
-  S3L_ScreenCoord x2,
-  S3L_ScreenCoord y2)
-{
-  int32_t winding =
-    (y1 - y0) * (x2 - x1) - (x1 - x0) * (y2 - y1);
-    // ^ cross product for points with z == 0
-
-  return winding > 0 ? 1 : (winding < 0 ? -1 : 0);
-}
-
-
-/**
-  Checks if given triangle (in Screen Space) is at least partially visible,
-  i.e. returns false if the triangle is either completely outside the frustum
-  (left, right, top, bottom, near) or is invisible due to backface culling.
-*/
-static inline int8_t S3L_triangleIsVisible(
-  S3L_Vec4 p0,
-  S3L_Vec4 p1,
-  S3L_Vec4 p2,
-  uint8_t backfaceCulling)
-{
-  #define clipTest(c,cmp,v)\
-    (p0.c cmp (v) && p1.c cmp (v) && p2.c cmp (v))
-
-  if ( // outside frustum?
-#if S3L_NEAR_CROSS_STRATEGY == 0
-      p0.z <= S3L_NEAR || p1.z <= S3L_NEAR || p2.z <= S3L_NEAR ||
-      // ^ partially in front of NEAR?
-#else
-      clipTest(z,<=,S3L_NEAR) || // completely in front of NEAR?
+#if S3L_STENCIL_BUFFER
+  for (uint32_t i = 0; i < S3L_STENCIL_BUFFER_SIZE; ++i)
+    S3L_stencilBuffer[i] = 0;
 #endif
-      clipTest(x,<,0) ||
-      clipTest(x,>=,S3L_RESOLUTION_X) ||
-      clipTest(y,<,0) ||
-      clipTest(y,>,S3L_RESOLUTION_Y)
-    )
-    return 0;
-
-  #undef clipTest
-
-  if (backfaceCulling != 0)
-  {
-    int8_t winding =
-      S3L_triangleWinding(p0.x,p0.y,p1.x,p1.y,p2.x,p2.y);
-
-    if ((backfaceCulling == 1 && winding > 0) ||
-        (backfaceCulling == 2 && winding < 0))
-      return 0;
-  }
-
-  return 1;
 }
-
-void _S3L_projectVertex(
-  const S3L_Model3D *model,
-  S3L_Index triangleIndex,
-  uint8_t vertex,
-  S3L_Mat4 projectionMatrix, 
-  S3L_Vec4 *result)
-{
-  uint32_t vertexIndex = model->triangles[triangleIndex * 3 + vertex] * 3;
-
-  result->x = model->vertices[vertexIndex];
-  result->y = model->vertices[vertexIndex + 1];
-  result->z = model->vertices[vertexIndex + 2];
-  result->w = S3L_FRACTIONS_PER_UNIT; // needed for translation 
- 
-  S3L_vec3Xmat4(result,projectionMatrix);
-
-  result->w = result->z;
-  /* We'll keep the non-clamped z in w for sorting. */ 
-}
-
-void _S3L_mapProjectedVertexToScreen(S3L_Vec4 *vertex, S3L_Unit focalLength)
-{
-  vertex->z = vertex->z >= S3L_NEAR ? vertex->z : S3L_NEAR;
-  /* ^ This firstly prevents zero division in the follwoing z-divide and
-    secondly "pushes" vertices that are in front of near a little bit forward,
-    which makes them behave a bit better. If all three vertices end up exactly
-    on NEAR, the triangle will be culled. */ 
-
-  S3L_perspectiveDivide(vertex,focalLength);
-      
-  S3L_ScreenCoord sX, sY;
-      
-  S3L_mapProjectionPlaneToScreen(*vertex,&sX,&sY);
-   
-  vertex->x = sX;
-  vertex->y = sY;
-}
-
-/**
-  Projects a triangle to the screen. If enabled, a triangle can be potentially
-  subdivided into two if it crosses the near plane, in which case two projected
-  triangles are returned (return value will be 1).
-*/
-uint8_t _S3L_projectTriangle(
-  const S3L_Model3D *model,
-  S3L_Index triangleIndex,
-  S3L_Mat4 matrix,
-  uint32_t focalLength,
-  S3L_Vec4 transformed[6])
-{
-  _S3L_projectVertex(model,triangleIndex,0,matrix,&(transformed[0]));
-  _S3L_projectVertex(model,triangleIndex,1,matrix,&(transformed[1]));
-  _S3L_projectVertex(model,triangleIndex,2,matrix,&(transformed[2]));
-
-  uint8_t result = 0;
-
-#if S3L_NEAR_CROSS_STRATEGY == 2
-  uint8_t infront = 0;
-  uint8_t behind = 0;
-  uint8_t infrontI[3];
-  uint8_t behindI[3];
-
-  for (uint8_t i = 0; i < 3; ++i)
-    if (transformed[i].z < S3L_NEAR)
-    {
-      infrontI[infront] = i;
-      infront++;
-    }
-    else
-    {
-      behindI[behind] = i;
-      behind++;
-    }
-
-#define interpolateVertex \
-  S3L_Unit ratio =\
-    ((transformed[be].z - S3L_NEAR) * S3L_FRACTIONS_PER_UNIT) /\
-    (transformed[be].z - transformed[in].z);\
-  transformed[in].x = transformed[be].x - \
-    ((transformed[be].x - transformed[in].x) * ratio) /\
-      S3L_FRACTIONS_PER_UNIT;\
-  transformed[in].y = transformed[be].y -\
-    ((transformed[be].y - transformed[in].y) * ratio) /\
-      S3L_FRACTIONS_PER_UNIT;\
-  transformed[in].z = S3L_NEAR;
-  
-  if (infront == 2)
-  {
-    // shift the two vertices forward along the edge
-    for (uint8_t i = 0; i < 2; ++i)
-    {
-      uint8_t be = behindI[0], in = infrontI[i];
-    
-      interpolateVertex
-    }
-  }
-  else if (infront == 1)
-  {
-    // create another triangle and do the shifts
-    transformed[3] = transformed[behindI[1]];
-    transformed[4] = transformed[infrontI[0]];
-    transformed[5] = transformed[infrontI[0]];
-
-    for (uint8_t i = 0; i < 2; ++i)
-    {
-      uint8_t be = behindI[i], in = i + 4;
-
-      interpolateVertex
-    }
-
-    transformed[infrontI[0]] = transformed[4];
-
-    _S3L_mapProjectedVertexToScreen(&transformed[3],focalLength);
-    _S3L_mapProjectedVertexToScreen(&transformed[4],focalLength);
-    _S3L_mapProjectedVertexToScreen(&transformed[5],focalLength);
-
-    result = 1;
-  }
-
-#undef interpolateVertex
-#endif // S3L_NEAR_CROSS_STRATEGY == 2
-
-  _S3L_mapProjectedVertexToScreen(&transformed[0],focalLength);
-  _S3L_mapProjectedVertexToScreen(&transformed[1],focalLength);
-  _S3L_mapProjectedVertexToScreen(&transformed[2],focalLength);
-
-  return result;
-}
-
 
 void S3L_drawScene(S3L_Scene scene)
 {
