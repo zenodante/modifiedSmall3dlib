@@ -1,6 +1,10 @@
 #ifndef S3L_CONFIG_H_
 #define S3L_CONFIG_H_
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+  
 #define S3L_RESOLUTION_X       120
 #define S3L_RESOLUTION_Y       120
 
@@ -25,4 +29,9 @@
 
 
 #define S3L_PIXEL_FUNCTION
+  
+#ifdef __cplusplus
+}
+#endif
+
 #endif
