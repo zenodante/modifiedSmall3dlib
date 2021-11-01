@@ -1,6 +1,9 @@
 #ifndef SMALL3DLIB_H
 #define SMALL3DLIB_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
 /*
   Simple realtime 3D software rasterization renderer. It is fast, focused on
   resource-limited computers, located in a single C header file, with no
@@ -389,5 +392,9 @@ extern void S3L_drawScene(S3L_Scene scene);
   0,m,  m,m,  0,0,\
   m,0,  0,m,  m,m,\
   0,0,  0,m,  m,0
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // guard
