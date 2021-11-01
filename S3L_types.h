@@ -5,7 +5,21 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
- #include <stdint.h> 
+
+#include <stdint.h> 
+
+/** Units of measurement in 3D space. There is S3L_FRACTIONS_PER_UNIT in one
+spatial unit. By dividing the unit into fractions we effectively achieve a
+fixed point arithmetic. The number of fractions is a constant that serves as
+1.0 in floating point arithmetic (normalization etc.). */
+
+typedef int32_t S3L_Unit;    
+
+
+
+typedef int16_t S3L_ScreenCoord;
+typedef uint16_t S3L_Index;
+
 typedef int16_t S3L_ScreenCoord;
 typedef uint16_t S3L_Index;
 
@@ -98,7 +112,7 @@ typedef struct
                                back, e.g. for transparency. */
   S3L_ScreenCoord triangleSize[2]; /**< Rasterized triangle width and height,
                               can be used e.g. for MIP mapping. */
-} S3L_PixelInfo;         /**< Used to pass the info about a rasterized pixel
+}S3L_PixelInfo;         /**< Used to pass the info about a rasterized pixel
                               (fragment) to the user-defined drawing func. */
 
 
