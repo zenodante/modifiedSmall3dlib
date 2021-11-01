@@ -35,20 +35,7 @@
   #define S3L_RESOLUTION_Y S3L_resolutionY
 #endif
 
-/** Units of measurement in 3D space. There is S3L_FRACTIONS_PER_UNIT in one
-spatial unit. By dividing the unit into fractions we effectively achieve a
-fixed point arithmetic. The number of fractions is a constant that serves as
-1.0 in floating point arithmetic (normalization etc.). */
 
-typedef int32_t S3L_Unit;    
-
-/** How many fractions a spatial unit is split into. This is NOT SUPPOSED TO
-BE REDEFINED, so rather don't do it (otherwise things may overflow etc.). */
-
-#define S3L_FRACTIONS_PER_UNIT 512
-
-typedef int16_t S3L_ScreenCoord;
-typedef uint16_t S3L_Index;
 
 #ifndef S3L_NEAR_CROSS_STRATEGY
   /** Specifies how the library will handle triangles that partially cross the
@@ -264,21 +251,8 @@ static inline int8_t S3L_triangleWinding(
   S3L_ScreenCoord y2);
 static inline void S3L_initPixelInfo(S3L_PixelInfo *p);
 // general helper functions
-static inline S3L_Unit S3L_abs(S3L_Unit value);
-static inline S3L_Unit S3L_min(S3L_Unit v1, S3L_Unit v2);
-static inline S3L_Unit S3L_max(S3L_Unit v1, S3L_Unit v2);
-static inline S3L_Unit S3L_clamp(S3L_Unit v, S3L_Unit v1, S3L_Unit v2);
-static inline S3L_Unit S3L_zeroClamp(S3L_Unit value);
-static inline S3L_Unit S3L_wrap(S3L_Unit value, S3L_Unit mod);
-static inline S3L_Unit S3L_nonZero(S3L_Unit value);
 
-/** Interpolated between two values, v1 and v2, in the same ratio as t is to
-  tMax. Does NOT prevent zero division. */
-static inline S3L_Unit S3L_interpolate(
-  S3L_Unit v1,
-  S3L_Unit v2,
-  S3L_Unit t,
-  S3L_Unit tMax);
+
 /** Same as S3L_interpolate but with v1 == 0. Should be faster. */
 static inline S3L_Unit S3L_interpolateFrom0(
   S3L_Unit v2,
@@ -322,6 +296,12 @@ static inline void _S3L_mapProjectedVertexToScreen(
     S3L_Vec4 *vertex, 
     S3L_Unit focalLength);
 
+static inline void _S3L_projectVertex(
+  const S3L_Model3D *model,
+  S3L_Index triangleIndex,
+  uint8_t vertex,
+  S3L_Mat4 projectionMatrix, 
+  S3L_Vec4 *result);
 #define S3L_UNUSED(what) (void)(what) ///< helper macro for unused vars
 
 #define S3L_HALF_RESOLUTION_X (S3L_RESOLUTION_X >> 1)
@@ -512,45 +492,9 @@ static const S3L_Unit S3L_sinTable[S3L_SIN_TABLE_LENGTH] =
   (S3L_FRACTIONS_PER_UNIT / (S3L_SIN_TABLE_LENGTH * 4))
 
 
-static inline S3L_Unit S3L_abs(S3L_Unit value)
-{
-  return value * (((value >= 0) << 1) - 1);
-}
 
-static inline S3L_Unit S3L_min(S3L_Unit v1, S3L_Unit v2)
-{
-  return v1 >= v2 ? v2 : v1;
-}
 
-static inline S3L_Unit S3L_max(S3L_Unit v1, S3L_Unit v2)
-{
-  return v1 >= v2 ? v1 : v2;
-}
 
-static inline S3L_Unit S3L_clamp(S3L_Unit v, S3L_Unit v1, S3L_Unit v2)
-{
-  return v >= v1 ? (v <= v2 ? v : v2) : v1;
-}
-
-static inline S3L_Unit S3L_zeroClamp(S3L_Unit value)
-{
-  return (value * (value >= 0));
-}
-
-static inline S3L_Unit S3L_wrap(S3L_Unit value, S3L_Unit mod)
-{
-  return value >= 0 ? (value % mod) : (mod + (value % mod) - 1);
-}
-
-static inline S3L_Unit S3L_nonZero(S3L_Unit value)
-{
-  return (value + (value == 0));
-}
-
-static inline S3L_Unit S3L_interpolate(S3L_Unit v1, S3L_Unit v2, S3L_Unit t, S3L_Unit tMax)
-{
-  return v1 + ((v2 - v1) * t) / tMax;
-}
 
 static inline S3L_Unit S3L_interpolateByUnit(S3L_Unit v1, S3L_Unit v2, S3L_Unit t)
 {
@@ -771,6 +715,47 @@ static inline void _S3L_projectVertex(
   /* We'll keep the non-clamped z in w for sorting. */ 
 }
 //function body-------------------------------------------------------------------------------
+
+S3L_Unit S3L_abs(S3L_Unit value)
+{
+  return value * (((value >= 0) << 1) - 1);
+}
+
+S3L_Unit S3L_min(S3L_Unit v1, S3L_Unit v2)
+{
+  return v1 >= v2 ? v2 : v1;
+}
+
+S3L_Unit S3L_max(S3L_Unit v1, S3L_Unit v2)
+{
+  return v1 >= v2 ? v1 : v2;
+}
+
+S3L_Unit S3L_clamp(S3L_Unit v, S3L_Unit v1, S3L_Unit v2)
+{
+  return v >= v1 ? (v <= v2 ? v : v2) : v1;
+}
+
+S3L_Unit S3L_zeroClamp(S3L_Unit value)
+{
+  return (value * (value >= 0));
+}
+
+S3L_Unit S3L_wrap(S3L_Unit value, S3L_Unit mod)
+{
+  return value >= 0 ? (value % mod) : (mod + (value % mod) - 1);
+}
+
+S3L_Unit S3L_nonZero(S3L_Unit value)
+{
+  return (value + (value == 0));
+}
+
+S3L_Unit S3L_interpolate(S3L_Unit v1, S3L_Unit v2, S3L_Unit t, S3L_Unit tMax)
+{
+  return v1 + ((v2 - v1) * t) / tMax;
+}
+
 S3L_Unit S3L_sin(S3L_Unit x)
 {
   x = S3L_wrap(x / S3L_SIN_TABLE_UNIT_STEP,S3L_SIN_TABLE_LENGTH * 4);
@@ -2307,7 +2292,7 @@ void S3L_drawScene(S3L_Scene scene)
 
   #undef cmp
 
-  for (S3L_Index i = 0; i < S3L_sortArrayLength; ++i) // draw sorted triangles
+  for (S3L_Index i = 0; i < S3L_sortArrayLength; ++i) // draw sorted trianglesS3L_PixelInfo
   {
     modelIndex = S3L_sortArray[i].modelIndex;
     triangleIndex = S3L_sortArray[i].triangleIndex;
