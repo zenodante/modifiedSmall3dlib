@@ -2,6 +2,10 @@
 #define S3L_TYPES_H_
 #include <stdint.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+  
 typedef int16_t S3L_ScreenCoord;
 typedef uint16_t S3L_Index;
 
@@ -99,6 +103,8 @@ typedef struct
 
 
 
-
+#ifdef __cplusplus
+} //end extern "C"
+#endif
 
 #endif
