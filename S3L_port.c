@@ -2,7 +2,7 @@
 #include "S3L_types.h"
 #include "texture_model.h"
 #include "small3dlib.h"
-inline uint16_t sampleTexture(int32_t u, int32_t v);
+inline uint8_t sampleTexture(int32_t u, int32_t v);
 static uint16_t *pFBuff;
 static uint32_t previousTriangle = -1;
 static S3L_Vec4 uv0, uv1, uv2;
@@ -40,11 +40,11 @@ void S3L_pixel_function(S3L_PixelInfo *pixel){
 
   buf += pixel->y * 120;
   buf += pixel->x;
-  *buf = sampleTexture(uv[0] >> 2,uv[1] >> 2);
+  *buf = cityPalette[sampleTexture(uv[0] >> 2,uv[1] >> 2)];
 
 }
 
-inline uint16_t sampleTexture(int32_t u, int32_t v)
+inline uint8_t sampleTexture(int32_t u, int32_t v)
 {
   uint32_t index = v * CITY_TEXTURE_WIDTH + u;
 
