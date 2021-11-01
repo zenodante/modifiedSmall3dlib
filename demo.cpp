@@ -89,7 +89,7 @@ void update(uint32_t tick) {
 
 // draw the world
 void draw(uint32_t tick) {
-  pen(0,0,0);
+  pen(0,0,150);
   clear();
       models[1].transform.rotation.y += models[1].transform.rotation.z; // overturn the car for the rendering
     S3L_newFrame();
