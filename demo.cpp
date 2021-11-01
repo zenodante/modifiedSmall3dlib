@@ -89,6 +89,7 @@ void update(uint32_t tick) {
 
 // draw the world
 void draw(uint32_t tick) {
+  pen(0,0,0);
   clear();
       models[1].transform.rotation.y += models[1].transform.rotation.z; // overturn the car for the rendering
     S3L_newFrame();
@@ -98,7 +99,7 @@ void draw(uint32_t tick) {
       models[1].transform.rotation.y -= models[1].transform.rotation.z; // turn the car back for the physics
 
 
-      uint32_t frameDiffMs = 100;
+      uint32_t frameDiffMs = tick*100;
       previousTime = tick;
 
       int16_t step = (velocity * frameDiffMs) / 1024;                             
