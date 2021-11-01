@@ -145,9 +145,23 @@ extern "C" {
 
 #include "S3L_types.h"
 #include "S3L_config.h"
-
+#include "S3L_port.h"
 extern void S3L_PIXEL_FUNCTION(S3L_PixelInfo *pixel); // forward decl
+extern S3L_Unit S3L_abs(S3L_Unit value);
+extern S3L_Unit S3L_min(S3L_Unit v1, S3L_Unit v2);
+extern S3L_Unit S3L_max(S3L_Unit v1, S3L_Unit v2);
+extern S3L_Unit S3L_clamp(S3L_Unit v, S3L_Unit v1, S3L_Unit v2);
+extern S3L_Unit S3L_zeroClamp(S3L_Unit value);
+extern S3L_Unit S3L_wrap(S3L_Unit value, S3L_Unit mod);
+extern S3L_Unit S3L_nonZero(S3L_Unit value);
 
+/** Interpolated between two values, v1 and v2, in the same ratio as t is to
+  tMax. Does NOT prevent zero division. */
+extern S3L_Unit S3L_interpolate(
+  S3L_Unit v1,
+  S3L_Unit v2,
+  S3L_Unit t,
+  S3L_Unit tMax);
 extern S3L_Unit S3L_sin(S3L_Unit x);
 extern S3L_Unit S3L_asin(S3L_Unit x);
 extern S3L_Unit S3L_cos(S3L_Unit x);
